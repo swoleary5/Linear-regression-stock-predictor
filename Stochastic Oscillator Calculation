@@ -1,0 +1,35 @@
+import pandas as pd
+import numpy as np
+
+df = pd.read_excel("C:\\Users\\Sean\\Downloads\\AAPL Test Sheet.xlsx")
+
+length = len(df)
+
+stoch_osc = []
+stoch_osc.extend([np.nan]*13)
+
+def calc_stoch_osc(df, start, end, length, stoch_osc):
+    while end <= length:
+        df1 = df[start:end]["Close"]
+        dfh = df[start:end]["High"]
+        dfl = df[start:end]["Low"]
+        price = df1[end-1]
+        low = min(dfl)
+        high = max(dfh)
+        k = ((price - low)/(high-low))*100
+        stoch_osc.append(k)
+        end += 1
+        start += 1
+    return stoch_osc
+
+print(calc_stoch_osc(df, 0, 14, length, stoch_osc))
+
+df["stoch_osc"] = stoch_osc
+
+#fill in nan values with average
+avg_stoch_osc = df.stoch_osc.mean()
+
+#fill avg into RSI into dataframe
+df.stoch_osc.fillna(avg_stoch_osc, inplace = True)
+
+df.to_excel("C:\\Users\\Sean\\Downloads\\AAPL Test Sheet.xlsx", index = False)
