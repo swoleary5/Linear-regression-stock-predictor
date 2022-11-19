@@ -1,0 +1,233 @@
+import yfinance as yf
+import datetime
+import functools
+from yahoo_fin.stock_info import *
+import pandas as pd
+import numpy as np
+from sklearn import *
+import scipy.stats as st
+
+# create list to return stock picks to
+winners = []
+
+# get the stocks in the dow
+stocks = tickers_dow()
+print(stocks)
+
+#define start date and end date for data
+start_date = '2000-01-01'
+end_date = datetime.date.today() - datetime.timedelta(days=1)
+
+
+for stock in stocks:
+    df = pd.DataFrame(yf.download(stock, start_date, end_date))
+    dfc = df["Close"]
+    df.fillna(df["Close"][-2], inplace = True)
+
+
+    """
+    RSI CALCULATION BEGIN
+    """
+    train_RSI = []
+    train_RSI.extend([np.nan] * 13)
+
+    def calculateRSI(df, start, end, length, RSI):
+        while end <= length:
+            df1 = np.array(df[start:end])
+
+            # Calculate the day over day change in 14 day period
+            # assign increases to winners and decreases to losers
+            winners = []
+            losers = []
+
+            comps = []
+            for i in range(13):
+                comp = df1[i+1] - df1[i]
+                comps.append(comp)
+
+            for i in range(len(comps)):
+                if comps[int(i)] >= 0:
+                    winners.append(comps[int(i)])
+                if comps[int(i)] < 0:
+                    losers.append(comps[int(i)])
+
+            # Find the avg for winners and losers
+            winner_avg = np.average(winners)
+            loser_avg = np.average(losers)
+
+            # Calculate RSI
+            RS = winner_avg / loser_avg
+            RSI_val = 100 - (100 / (1 - RS))
+
+            # Append to RSI List
+            RSI.append(RSI_val)
+
+            start += 1
+            end += 1
+
+    calculateRSI(dfc, 0, 14, len(df), train_RSI)
+
+    # create new column in dataframe
+    df["RSI"] = train_RSI
+
+    # fill in nan values with average
+    avg_train_RSI = df.RSI.mean()
+
+    # fill avg into RSI into dataframe
+    df.RSI.fillna(avg_train_RSI, inplace=True)
+    """
+    RSI CALCULATION COMPLETE
+    """
+
+    """
+    LOG RETURNS BEGIN
+    """
+    df['pct_rtrn'] = df.Close.pct_change()
+    df["log_rtrn"] = np.log(1 + df.pct_rtrn)
+
+    df.pct_rtrn.fillna(0, inplace=True)
+    df.log_rtrn.fillna(0, inplace=True)
+    """
+    LOG RETURNS COMPLETE
+    """
+
+    """
+    STOCHASTIC OSCILLATOR BEGIN
+    """
+    train_stoch_osc = []
+    train_stoch_osc.extend([np.nan] * 13)
+
+    def calc_stoch_osc(df, start, end, length, stoch_osc):
+        while (start >= 0) and  (end <= length):
+            df1 = df[start:end]["Close"].values.tolist()
+            price = df1[13]
+            dfh = df[start:end]["High"]
+            dfl = df[start:end]["Low"]
+            low = min(dfl)
+            high = max(dfh)
+            if low == high:
+                k = 0
+            else: k = ((price - low) / (high - low)) * 100
+            stoch_osc.append(k)
+            end += 1
+            start += 1
+        return stoch_osc
+
+
+    calc_stoch_osc(df, 0, 14, len(df), train_stoch_osc)
+
+    df["stoch_osc"] = train_stoch_osc
+
+    # fill in nan values with average
+    avg_stoch_osc_train = df.stoch_osc.mean()
+
+    # fill avg into RSI into dataframe
+
+    df.stoch_osc.fillna(avg_stoch_osc_train, inplace=True)
+    """
+    STOCHASTIC OSCILLATOR COMPLETE
+    """
+
+    """
+    VOLUME OVER PRICE BEGIN
+    """
+    vol_price_train = []
+
+    def vol_ov_price(df, length, start, list):
+        while start <= length:
+            dfc = df["Close"][start - 1]
+            dfv = df["Volume"][start - 1]
+            x = dfv / dfc
+            list.append(x)
+            start += 1
+
+    vol_ov_price(df, len(df), 1, vol_price_train)
+
+    df["vol/price"] = vol_price_train
+    """
+    VOLUME OVER PRICE COMPLETE
+    """
+
+    """
+    DAY FORWARD BEGIN
+    """
+    day_frwrd_train = []
+
+    def day_forward(df, start, end, length, days):
+        while end <= length:
+            df1 = df[start:end].values.tolist()
+            frwrd = df1[1]
+            days.append(frwrd)
+            start += 1
+            end += 1
+        return days
+
+    day_forward(df["Close"], 0, 2, len(df), day_frwrd_train)
+
+    day_frwrd_train.append(np.nan)
+
+    df["day_frwrd"] = day_frwrd_train
+    """
+    DAY FORWARD COMPLETE
+    """
+
+    #Get the training set of 2000-Yesterday and the Test set of today
+    length = len(df) - 1
+    len2 = len(df) - 256
+    today = df.tail(1)
+    past_year = df.tail(256)
+    dftrain = df.head(len2)
+    df = df[13:length]
+
+    """
+    DEFINE TRAINING PREDICTION BEGIN
+    """
+    reg = linear_model.LinearRegression()
+    reg.fit(dftrain[["Open", "High", "Low", "Close", "RSI", "log_rtrn",
+                   "stoch_osc", "vol/price"]].values, dftrain.day_frwrd)
+
+    pred = reg.predict(past_year[["Open", "High", "Low", "Close", "RSI", "log_rtrn",
+                             "stoch_osc", "vol/price"]].values)
+
+    past_year["day_frwrd"] = pred
+    """
+    TRAINING PREDICTION COMPLETE
+    """
+
+    """
+    DEFINE STD DEVIATION BEGIN
+    """
+    def error_calc(preds, real):
+        errorL = []
+        for i in range(len(preds)):
+            error = preds[i] - real[i]
+            errorL.append(error)
+        stdev = np.std(errorL)
+        return stdev
+
+    std_dev = error_calc(past_year["day_frwrd"], past_year["Close"])
+    """
+    STANDARD DEVIATION DEFINED
+    """
+
+    """
+    BEGIN TEST
+    """
+    reg = linear_model.LinearRegression()
+    reg.fit(df[["Open", "High", "Low", "Close", "RSI", "log_rtrn",
+                     "stoch_osc", "vol/price"]].values, df.day_frwrd)
+
+    pred = reg.predict(today[["Open", "High", "Low", "Close", "RSI", "log_rtrn",
+                                "stoch_osc", "vol/price"]].values)
+
+
+    today["day_frwrd"] = pred
+
+    difference = today["day_frwrd"] - today["Close"]
+    num_stds = difference / std_dev
+    probability = st.norm.cdf(num_stds)
+    if probability > .88:
+         winners.append(str(stock) + ": Probability of Win: " + str(probability) +
+                        " Predicted Price: " + str(float(today["day_frwrd"])))
+
+print(winners)
