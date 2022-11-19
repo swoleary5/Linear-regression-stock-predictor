@@ -1,0 +1,58 @@
+import pandas as pd
+import numpy as np
+
+df = pd.read_excel("C:\\Users\\Sean\\Downloads\\AAPL Test Sheet.xlsx")
+
+close = df["Close"]
+length = len(close)
+
+RSI = []
+RSI.extend([np.nan]*13)
+
+def calculateRSI(df, start, end, length, RSI):
+    while end <= length:
+        df1 = df[start:end]
+
+        # Calculate the day over day change in 14 day period
+        # assign increases to winners and decreases to losers
+        winners = []
+        losers = []
+
+        comps = []
+        for i in range(start, end-1):
+            comp = df1[i + 1] - df1[i]
+            comps.append(comp)
+
+        for i in range(len(comps)):
+            if comps[int(i)] >= 0:
+                winners.append(comps[int(i)])
+            if comps[int(i)] < 0:
+                losers.append(comps[int(i)])
+
+
+        # Find the avg for winners and losers
+        winner_avg = np.average(winners)
+        loser_avg = np.average(losers)
+
+        # Calculate RSI
+        RS = winner_avg / loser_avg
+        RSI_val = 100 - (100 / (1 - RS))
+
+        # Append to RSI List
+        RSI.append(RSI_val)
+
+        start += 1
+        end += 1
+
+calculateRSI(close, 0, 14, length, RSI)
+
+#create new column in dataframe
+df["RSI"] = RSI
+
+#fill in nan values with average
+avg_RSI = df.RSI.mean()
+
+#fill avg into RSI into dataframe
+df.RSI.fillna(avg_RSI, inplace = True)
+
+df.to_excel("C:\\Users\\Sean\\Downloads\\AAPL Test Sheet.xlsx", index = False)
